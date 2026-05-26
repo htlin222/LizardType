@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build .dmg
+        run: make dmg
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LizardType-dmg
+          path: build/*.dmg
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/*.dmg
+          generate_release_notes: true
+          body: |
+            ### LizardType ${{ github.ref_name }}
+
+            Native macOS push-to-talk dictation (Apple Silicon).
+
+            **Install**
+
+            1. Download the `.dmg` below, open it, drag **LizardType** to Applications.
+            2. The app is **ad-hoc signed** (no Apple Developer certificate), so Gatekeeper
+               blocks it on first launch. Clear the quarantine flag once:
+               ```bash
+               xattr -dr com.apple.quarantine /Applications/LizardType.app
+               ```
+               …or right-click **LizardType** → **Open** → **Open**.
+            3. Grant **Accessibility** + **Microphone** when prompted — see the README.

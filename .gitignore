@@ -1,0 +1,38 @@
+# Build artifacts
+build/
+*.dmg
+*.app/
+
+# Generated app icon (regenerated from Resources/AppIcon-source.png by build.sh)
+*.icns
+*.iconset/
+
+# Secrets — NEVER commit your ChatGPT session or signing material
+cookies.json
+cookies*.json
+*.p12
+*.pem
+*.key
+.env
+.env.*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Xcode / SwiftPM (if anyone opens the folder in Xcode)
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log

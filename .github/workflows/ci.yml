@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Build
+        run: make build
+
+      - name: Sanity-check the bundle
+        run: |
+          test -x "build/LizardType.app/Contents/MacOS/LizardType"
+          test -f "build/LizardType.app/Contents/Info.plist"
+          codesign -dv "build/LizardType.app" 2>&1 | head -5 || true
