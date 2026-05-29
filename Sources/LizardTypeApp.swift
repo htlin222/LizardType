@@ -40,7 +40,7 @@ struct MenuContent: View {
         }
         Text("Push-to-talk: \(settings.shortcutDisplay)")   // the real global trigger (hold)
         Divider()
-        Toggle("Clean up with ChatGPT", isOn: $settings.cleanupEnabled)   // off → paste raw transcript
+        Toggle("Clean up transcript (LLM pass)", isOn: $settings.cleanupEnabled)   // off → paste raw transcript
         if !app.lastTranscript.isEmpty {
             Divider()
             Button("Copy last transcript") {

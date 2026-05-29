@@ -29,6 +29,13 @@ enum Diagnostics {
         let audio = args.dropFirst().first {
             FileManager.default.fileExists(atPath: $0) && ($0.hasSuffix(".m4a") || $0.hasSuffix(".wav"))
         }
+
+        // --groq forces the Groq path; otherwise follow the configured provider.
+        if args.contains("--groq") || settings.provider == .groq {
+            await runGroqSelfTest(audio: audio, settings: settings, p: p)
+            return
+        }
+
         guard !cookies.isEmpty else { p("no cookies path set → skipping pipeline"); return }
 
         let bridge = ChatGPTBridge()
@@ -45,6 +52,34 @@ enum Diagnostics {
                 p("cleaning up…")
                 let clean = try await bridge.cleanup(raw: raw, prompt: settings.cleanupPrompt,
                                                      model: settings.model, language: "zh-TW")
+                p("CLEAN  : \(clean)")
+            } else {
+                p("(pass a .m4a/.wav path to also test transcribe + cleanup)")
+            }
+            p("=== self-test OK ===")
+        } catch {
+            p("ERROR: \(error.localizedDescription)")
+        }
+    }
+
+    private static func runGroqSelfTest(audio: String?, settings: AppSettings,
+                                        p: (String) -> Void) async {
+        p("provider: Groq")
+        p("API key: \(GroqSecrets.apiKey() != nil ? "found ✓" : "MISSING ✗")")
+        p("transcribe model: \(settings.groqTranscribeModel)")
+        p("cleanup model:    \(settings.groqCleanupModel)")
+        let groq = GroqClient()
+        do {
+            try await groq.validate()
+            if let audio {
+                p("transcribing \(audio) …")
+                let raw = try await groq.transcribe(audioURL: URL(fileURLWithPath: audio),
+                                                    language: settings.transcribeLanguage)
+                p("RAW    : \(raw)")
+                p("cleaning up…")
+                let clean = try await groq.cleanup(raw: raw, prompt: settings.cleanupPrompt,
+                                                   model: settings.groqCleanupModel,
+                                                   language: settings.oaiLanguage)
                 p("CLEAN  : \(clean)")
             } else {
                 p("(pass a .m4a/.wav path to also test transcribe + cleanup)")

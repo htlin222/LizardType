@@ -2,6 +2,21 @@ import Foundation
 import Combine
 import AppKit
 
+/// Backend that performs transcription + cleanup.
+/// - `.chatgpt`: logged-in WKWebView, runs on the user's ChatGPT session (no key).
+/// - `.groq`:    Groq REST API (OpenAI-compatible), driven by an API key.
+enum APIProvider: String, Codable, CaseIterable {
+    case chatgpt
+    case groq
+
+    var label: String {
+        switch self {
+        case .chatgpt: return "ChatGPT Web (cookies)"
+        case .groq:    return "Groq API (key)"
+        }
+    }
+}
+
 /// Hold-to-talk trigger. We default to holding a single modifier key (most
 /// ergonomic for push-to-talk) but also support a regular key+modifiers chord.
 enum TriggerKind: String, Codable, CaseIterable {
@@ -25,6 +40,9 @@ final class AppSettings: ObservableObject {
     static let shared = AppSettings()
     private let d = UserDefaults.standard
 
+    @Published var provider: APIProvider { didSet { d.set(provider.rawValue, forKey: "provider") } }
+    @Published var groqTranscribeModel: String { didSet { d.set(groqTranscribeModel, forKey: "groqTranscribeModel") } }
+    @Published var groqCleanupModel: String { didSet { d.set(groqCleanupModel, forKey: "groqCleanupModel") } }
     @Published var cookiesPath: String { didSet { d.set(cookiesPath, forKey: "cookiesPath") } }
     @Published var trigger: TriggerKind { didSet { d.set(trigger.rawValue, forKey: "trigger") } }
     // Custom shortcut (any key + modifiers). When enabled, overrides `trigger`.
@@ -45,6 +63,9 @@ final class AppSettings: ObservableObject {
     }
 
     private init() {
+        provider = APIProvider(rawValue: d.string(forKey: "provider") ?? "") ?? .chatgpt
+        groqTranscribeModel = d.string(forKey: "groqTranscribeModel") ?? "whisper-large-v3-turbo"
+        groqCleanupModel = d.string(forKey: "groqCleanupModel") ?? "llama-3.3-70b-versatile"
         cookiesPath = d.string(forKey: "cookiesPath") ?? ""
         trigger = TriggerKind(rawValue: d.string(forKey: "trigger") ?? "") ?? .rightOption
         useCustomShortcut = d.bool(forKey: "useCustomShortcut")

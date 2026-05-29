@@ -9,24 +9,50 @@ A native macOS push-to-talk dictation app. Hold a key, speak, release — your
 speech is transcribed and (optionally) cleaned up by ChatGPT, then pasted at your
 cursor in any app.
 
-Unlike [ZeroType](https://github.com/nick1ee/ZeroType) (which needs a paid API
-key), LizardType uses **your existing ChatGPT web session** (`cookies.json`) via
-a hidden, logged-in `WKWebView` — so transcription and cleanup run on your
-ChatGPT subscription. No API key, no extra cost.
+LizardType supports two interchangeable **API providers** (pick one in Settings):
+
+- **ChatGPT Web** (default) — uses **your existing ChatGPT web session**
+  (`cookies.json`) via a hidden, logged-in `WKWebView`, so transcription and
+  cleanup run on your ChatGPT subscription. No API key, no extra cost. Unlike
+  [ZeroType](https://github.com/nick1ee/ZeroType), which needs a paid API key.
+- **Groq API** — uses [Groq](https://console.groq.com/docs/quickstart)'s
+  OpenAI-compatible endpoints (Whisper for transcription, Llama/etc. for
+  cleanup). Fast and key-driven; no ChatGPT session needed. Just paste your
+  `GROQ_API_KEY`.
 
 ## How it works
 
 ```
-hold trigger key ─▶ record m4a ─▶ WKWebView (logged in via cookies.json)
-                                     ├─ POST /backend-api/transcribe   → raw text
-                                     └─ POST /backend-api/conversation → cleaned text
+                                  ┌─ ChatGPT Web (cookies.json) ─ WKWebView
+hold trigger key ─▶ record m4a ─▶─┤    ├─ POST /backend-api/transcribe   → raw text
+                                  │    └─ POST /backend-api/conversation → cleaned text
+                                  │
+                                  └─ Groq API (GROQ_API_KEY) ─ URLSession
+                                       ├─ POST /openai/v1/audio/transcriptions → raw text
+                                       └─ POST /openai/v1/chat/completions     → cleaned text
                                                                           │
                                             paste at cursor (⌘V) ◀────────┘
 ```
 
-The WebView runs real WebKit on your Mac, so it passes Cloudflare like Safari and
-inherits your session. `/api/auth/session` provides the bearer token the
-`/backend-api/*` calls need.
+In **ChatGPT Web** mode the WebView runs real WebKit on your Mac, so it passes
+Cloudflare like Safari and inherits your session; `/api/auth/session` provides
+the bearer token the `/backend-api/*` calls need.
+
+### Using the Groq provider
+
+1. Get an API key at [console.groq.com](https://console.groq.com).
+2. **Settings → General → Provider → Groq API**, then paste the key (stored in
+   your macOS Keychain). Alternatively, leave it blank and set `GROQ_API_KEY` in
+   a `.env` file (current directory or `$HOME/.env`) — handy during `make run`.
+3. Optionally tweak the transcribe model (`whisper-large-v3-turbo`) and cleanup
+   model (`llama-3.3-70b-versatile`).
+
+Verify the whole pipeline from the terminal:
+
+```bash
+GROQ_API_KEY=gsk_… build/LizardType.app/Contents/MacOS/LizardType \
+  --selftest --groq /path/to/clip.m4a
+```
 
 ## Download
 

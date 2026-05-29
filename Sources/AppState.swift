@@ -49,6 +49,7 @@ final class AppState: ObservableObject {
     let settings = AppSettings.shared
     let recorder = AudioRecorder()
     private let bridge = ChatGPTBridge()
+    private let groq = GroqClient()
     private let hotkey = HotkeyManager()
     private let overlay = OverlayController()
     private var pipeline: Task<Void, Never>?
@@ -137,21 +138,38 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// The backend selected in Settings.
+    private var activeProvider: SpeechProvider {
+        settings.provider == .groq ? groq : bridge
+    }
+
     func warmBridge() async {
         status = .warming
-        guard !settings.cookiesPath.isEmpty else {
-            status = .error("Set cookies.json in Settings"); return
-        }
-        do {
-            NSLog("[LizardType] warming bridge with %@", settings.cookiesPath)
-            try await bridge.start(cookiesPath: settings.cookiesPath)
-            await bridge.waitUntilReady()
-            _ = try await bridge.accessToken(forceRefresh: true)   // verify login
-            status = .ready
-            NSLog("[LizardType] bridge ready — logged in")
-        } catch {
-            status = .error(error.localizedDescription)
-            NSLog("[LizardType] warm failed: %@", error.localizedDescription)
+        switch settings.provider {
+        case .groq:
+            do {
+                try await groq.validate()       // ensure a key is resolvable
+                status = .ready
+                NSLog("[LizardType] Groq provider ready")
+            } catch {
+                status = .error(error.localizedDescription)
+                NSLog("[LizardType] Groq warm failed: %@", error.localizedDescription)
+            }
+        case .chatgpt:
+            guard !settings.cookiesPath.isEmpty else {
+                status = .error("Set cookies.json in Settings"); return
+            }
+            do {
+                NSLog("[LizardType] warming bridge with %@", settings.cookiesPath)
+                try await bridge.start(cookiesPath: settings.cookiesPath)
+                await bridge.waitUntilReady()
+                _ = try await bridge.accessToken(forceRefresh: true)   // verify login
+                status = .ready
+                NSLog("[LizardType] bridge ready — logged in")
+            } catch {
+                status = .error(error.localizedDescription)
+                NSLog("[LizardType] warm failed: %@", error.localizedDescription)
+            }
         }
     }
 
@@ -265,10 +283,11 @@ final class AppState: ObservableObject {
         busy = true
         defer { busy = false; recorder.cleanup(url) }
         do {
-            await bridge.waitUntilReady()
+            let provider = activeProvider
+            if settings.provider == .chatgpt { await bridge.waitUntilReady() }
             status = .transcribing
             overlay.show(.transcribing)
-            let raw = try await bridge.transcribe(audioURL: url, language: settings.transcribeLanguage)
+            let raw = try await provider.transcribe(audioURL: url, language: settings.transcribeLanguage)
             guard !raw.isEmpty else { status = .ready; overlay.hide(); return }
             lastTranscript = raw
 
@@ -276,9 +295,10 @@ final class AppState: ObservableObject {
             if settings.cleanupEnabled {
                 status = .cleaning
                 overlay.show(.cleaning)
+                let cleanupModel = settings.provider == .groq ? settings.groqCleanupModel : settings.model
                 do {
-                    final = try await bridge.cleanup(raw: raw, prompt: settings.cleanupPrompt,
-                                                     model: settings.model, language: settings.oaiLanguage)
+                    final = try await provider.cleanup(raw: raw, prompt: settings.cleanupPrompt,
+                                                       model: cleanupModel, language: settings.oaiLanguage)
                 } catch {
                     // Cleanup failed (e.g. sentinel) — fall back to raw so text is never lost.
                     final = raw
