@@ -33,6 +33,11 @@ final class ChatGPTBridge: NSObject, WKNavigationDelegate {
     private var tokenFetchedAt: Date = .distantPast
     private let tokenTTL: TimeInterval = 240
 
+    /// Last time the bridge did real work, and last time we recycled the page.
+    /// Used to reclaim WebContent memory when the app has been idle (see `recycleIfIdle`).
+    private var lastActivity = Date()
+    private var lastReload = Date()
+
     override init() {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
@@ -64,9 +69,39 @@ final class ChatGPTBridge: NSObject, WKNavigationDelegate {
             // small settle for any CF/app bootstrapping
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             self.isReady = true
-            let waiters = self.readyWaiters; self.readyWaiters.removeAll()
-            for w in waiters { w.resume() }
+            self.resumeWaiters()
         }
+    }
+
+    // If a navigation fails we must still resume anyone parked in `waitUntilReady()`,
+    // otherwise those continuations (and their captured state) leak and `warmBridge` hangs.
+    nonisolated func webView(_ wv: WKWebView, didFail nav: WKNavigation!, withError error: Error) {
+        Task { @MainActor in self.resumeWaiters() }
+    }
+
+    nonisolated func webView(_ wv: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
+        Task { @MainActor in self.resumeWaiters() }
+    }
+
+    private func resumeWaiters() {
+        let waiters = readyWaiters; readyWaiters.removeAll()
+        for w in waiters { w.resume() }
+    }
+
+    /// Reclaim WebContent-process memory by reloading the warmed page after a long
+    /// idle stretch. ChatGPT's SPA never frees what it accumulates across dictations,
+    /// so a fresh load bounds the growth. No-op while busy / recently used so it never
+    /// interrupts an in-flight request. Cookies persist in the data store, so the
+    /// reloaded page stays logged in.
+    func recycleIfIdle(idleThreshold: TimeInterval = 600) {
+        guard isReady else { return }   // mid-load: leave it alone
+        let now = Date()
+        guard now.timeIntervalSince(lastActivity) > idleThreshold,
+              now.timeIntervalSince(lastReload) > idleThreshold else { return }
+        lastReload = now
+        isReady = false
+        cachedToken = nil
+        webView.reload()
     }
 
     // MARK: - Auth
@@ -99,6 +134,7 @@ final class ChatGPTBridge: NSObject, WKNavigationDelegate {
     /// POST audio to /backend-api/transcribe. Returns the raw transcript text.
     func transcribe(audioURL: URL, language: String) async throws -> String {
         guard isReady else { throw BridgeError.notReady }
+        lastActivity = Date()
         let data = try Data(contentsOf: audioURL)
         let b64 = data.base64EncodedString()
         let name = audioURL.lastPathComponent
@@ -151,6 +187,7 @@ final class ChatGPTBridge: NSObject, WKNavigationDelegate {
     /// Send `prompt + raw` to /backend-api/conversation; return the cleaned text.
     func cleanup(raw: String, prompt: String, model: String, language: String) async throws -> String {
         guard isReady else { throw BridgeError.notReady }
+        lastActivity = Date()
         let message = Prompts.cleanupMessage(prompt: prompt, raw: raw)
         let token = try await accessToken()
         let js = """

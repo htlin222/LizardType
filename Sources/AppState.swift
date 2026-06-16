@@ -136,6 +136,12 @@ final class AppState: ObservableObject {
                 if permsJustChanged, settings.playSounds { NSSound(named: "Glass")?.play() }
             }
         }
+
+        // Reclaim the WebView's WebContent memory when idle (ChatGPT provider only).
+        // Cheap to call every tick; it self-gates on idle time and never fires mid-use.
+        if settings.provider == .chatgpt, !busy, !recorder.isRecording {
+            bridge.recycleIfIdle()
+        }
     }
 
     /// The backend selected in Settings.

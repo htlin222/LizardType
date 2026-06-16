@@ -34,6 +34,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         rec.delegate = self
         rec.isMeteringEnabled = true
         guard rec.record() else {
+            // AVAudioRecorder may have already created the file on disk — don't orphan it.
+            try? FileManager.default.removeItem(at: url)
             throw NSError(domain: "LizardType", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "AVAudioRecorder failed to start (mic permission?)"])
         }
