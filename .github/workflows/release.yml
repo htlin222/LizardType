@@ -2,25 +2,99 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# Never run two releases at once (a manual tag + an auto bump could collide).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Decide what to release:
+      #   • tag push (vX.Y.Z) → release that exact tag, no bump
+      #   • push to main      → auto-bump from commit type, commit + tag, then release
+      #   • the auto-bump commit itself is skipped (guards against an infinite loop)
+      - name: Determine version
+        id: ver
+        run: |
+          set -euo pipefail
+          PLIST=Resources/Info.plist
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=$GITHUB_REF_NAME"  >> "$GITHUB_OUTPUT"
+            echo "release=true"          >> "$GITHUB_OUTPUT"
+            echo "bumped=false"          >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MSG="$(git log -1 --pretty=%s)"
+          if [[ "$MSG" == chore\(release\):* || "$MSG" == *"[skip ci]"* ]]; then
+            echo "Auto-bump commit detected — nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "bumped=false"  >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CUR="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$PLIST")"
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$PLIST")"
+          IFS='.' read -r MA MI PA <<< "$CUR"
+
+          # Pick the bump from conventional-commit prefixes since the last tag.
+          LAST="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          RANGE="${LAST:+$LAST..}HEAD"
+          LOG="$(git log --pretty=%B "$RANGE")"
+          if grep -qiE 'BREAKING CHANGE|^[a-z]+(\(.+\))?!:' <<< "$LOG"; then
+            MA=$((MA+1)); MI=0; PA=0
+          elif grep -qiE '^feat(\(.+\))?:' <<< "$LOG"; then
+            MI=$((MI+1)); PA=0
+          else
+            PA=$((PA+1))
+          fi
+          NEW="$MA.$MI.$PA"
+
+          /usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString $NEW"     "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set CFBundleVersion $((BUILD+1))"        "$PLIST"
+
+          echo "Bumping $CUR → $NEW (build $((BUILD+1)))"
+          echo "tag=v$NEW"    >> "$GITHUB_OUTPUT"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "bumped=true"  >> "$GITHUB_OUTPUT"
+
+      - name: Commit & tag the bump
+        if: steps.ver.outputs.bumped == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Resources/Info.plist
+          git commit -m "chore(release): ${{ steps.ver.outputs.tag }} [skip ci]"
+          git tag -a "${{ steps.ver.outputs.tag }}" -m "LizardType ${{ steps.ver.outputs.tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.ver.outputs.tag }}"
 
       - name: Toolchain
+        if: steps.ver.outputs.release == 'true'
         run: swift --version
 
       - name: Build .dmg
+        if: steps.ver.outputs.release == 'true'
         run: make dmg
 
       - name: Upload workflow artifact
+        if: steps.ver.outputs.release == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: LizardType-dmg
@@ -28,13 +102,14 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.ver.outputs.release == 'true'
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
           files: build/*.dmg
           generate_release_notes: true
           body: |
-            ### LizardType ${{ github.ref_name }}
+            ### LizardType ${{ steps.ver.outputs.tag }}
 
             Native macOS push-to-talk dictation (Apple Silicon).
 
