@@ -6,8 +6,11 @@ cd "$(dirname "$0")"
 APP_NAME="LizardType"
 BUNDLE_ID="com.lizardtype.app"
 BUILD_DIR="build"
-# Deployment target; override e.g. MACOS_TARGET=arm64-apple-macosx14.0 for older macOS.
-MACOS_TARGET="${MACOS_TARGET:-arm64-apple-macosx26.0}"
+# Deployment target. macOS 14 is the floor: RecordingOverlay uses the
+# `.symbolEffect(.variableColor…, options: .repeating)` API (14.0+).
+# Building on a newer SDK (e.g. macOS 26 CI) would otherwise stamp the
+# binary's minos at the SDK version and lock out every older Mac.
+MACOS_TARGET="${MACOS_TARGET:-arm64-apple-macosx14.0}"
 APP="$BUILD_DIR/$APP_NAME.app"
 MACOS_DIR="$APP/Contents/MacOS"
 RES_DIR="$APP/Contents/Resources"

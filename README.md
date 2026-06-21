@@ -73,7 +73,9 @@ Microphone (see [First-run setup](#first-run-setup)).
 ## Build
 
 Requires only the Xcode **Command Line Tools** (no full Xcode); builds for
-**Apple Silicon** against the macOS 26 SDK.
+**Apple Silicon**, targeting **macOS 14+** (Sonoma and later). It compiles
+against whatever SDK is installed, but the deployment target is pinned to
+macOS 14 so the app runs on older Macs — override with `MACOS_TARGET=…`.
 
 ```bash
 make build      # compile + sign  → build/LizardType.app
