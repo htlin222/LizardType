@@ -141,6 +141,13 @@ struct SettingsView: View {
                     TextField("Cleanup model slug", text: $settings.model)
                 }
             }
+            Section("Startup") {
+                Toggle("Launch at login & auto-restart", isOn: $settings.launchAtLogin)
+                    .onChange(of: settings.launchAtLogin) { _, on in LaunchManager.sync(enabled: on) }
+                Text("Keeps the menu-bar icon alive: macOS relaunches LizardType after it's quit by an Accessibility permission change, and starts it at login. Toggle visible in System Settings → General → Login Items.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Relaunch LizardType") { LaunchManager.relaunch() }
+            }
             Section("Misc") {
                 Toggle("Play start/stop sounds", isOn: $settings.playSounds)
                 Stepper("Max recording: \(settings.maxRecordingSeconds)s",

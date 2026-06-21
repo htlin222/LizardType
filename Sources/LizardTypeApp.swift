@@ -22,8 +22,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Diagnostics.runCLI(args); exit(0) }
             return
         }
+        // The keep-alive agent (launchd) and a manual Finder launch can both
+        // start us; defer to whichever instance is already running so we never
+        // show two menu-bar icons. Exit 0 so launchd treats it as a clean quit.
+        if isDuplicateInstance() {
+            NSLog("[LizardType] another instance is already running — exiting")
+            NSApp.terminate(nil)
+            return
+        }
         NSApp.setActivationPolicy(.accessory)
         AppState.shared.start()
+    }
+
+    /// True if an older instance of this app (lower PID) is already running.
+    private func isDuplicateInstance() -> Bool {
+        let me = NSRunningApplication.current
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.lizardtype.app"
+        let others = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0 != me && !$0.isTerminated }
+        return others.contains { $0.processIdentifier < me.processIdentifier }
     }
 }
 

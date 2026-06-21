@@ -62,6 +62,9 @@ final class AppState: ObservableObject {
     // MARK: - Startup
 
     func start() {
+        // Keep the menu-bar icon alive across the Accessibility-grant SIGKILL and
+        // at login (reconciled with the user's setting, default on).
+        LaunchManager.sync(enabled: settings.launchAtLogin)
         overlay.attach(recorder: recorder)
         overlay.setStopHandler { [weak self] in self?.finishRecording() }
         wireHotkey()
@@ -95,22 +98,38 @@ final class AppState: ObservableObject {
     private func promptForAccessibilityIfNeeded() {
         refreshPermissions()
         guard !accessibilityTrusted else { return }
-        PermissionsManager.promptAccessibility()   // system grant dialog
-        let alert = NSAlert()
-        alert.messageText = "Grant Accessibility to use LizardType"
-        alert.informativeText = """
-        LizardType needs Accessibility permission to capture the push-to-talk key \
-        (\(settings.trigger.label)) and to paste text.
+        PermissionsManager.promptAccessibility()   // system grant dialog (non-blocking)
+        // Defer our explanatory alert: running a modal during launch races the
+        // SwiftUI MenuBarExtra setup and can leave the status item missing. Let
+        // the menu-bar icon render first, then explain.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, !PermissionsManager.accessibilityTrusted else { return }
+            let relaunchNote = self.settings.launchAtLogin
+                ? "macOS may quit LizardType the moment you flip the switch — that's normal. " +
+                  "It relaunches itself within a few seconds (auto-start is on), so just wait " +
+                  "for the menu-bar icon to come back."
+                : "macOS may quit LizardType when you flip the switch. If the menu-bar icon " +
+                  "disappears, reopen LizardType from Applications (or turn on “Launch at login” " +
+                  "in Settings so it comes back by itself)."
+            let alert = NSAlert()
+            alert.messageText = "Enable Accessibility for LizardType"
+            alert.informativeText = """
+            LizardType needs Accessibility to capture the push-to-talk key \
+            (\(self.settings.trigger.label)) and to paste text.
 
-        Open System Settings → Privacy & Security → Accessibility, enable LizardType, \
-        and it will start working automatically — no restart needed.
-        """
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Later")
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            PermissionsManager.openAccessibilitySettings()
+            Open System Settings → Privacy & Security → Accessibility and turn on LizardType.
+            \(relaunchNote)
+
+            You can still record from the menu-bar icon without it — transcripts are copied \
+            to the clipboard so you can paste with ⌘V.
+            """
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Open System Settings")
+            alert.addButton(withTitle: "Later")
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                PermissionsManager.openAccessibilitySettings()
+            }
         }
     }
 

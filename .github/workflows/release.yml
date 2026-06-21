@@ -89,6 +89,39 @@ jobs:
         if: steps.ver.outputs.release == 'true'
         run: swift --version
 
+      # Import the stable self-signed cert so every release shares one code
+      # identity — that's what keeps users' Accessibility (TCC) grants working
+      # across updates. Without the secret, build.sh falls back to ad-hoc, so
+      # forks still build (they just won't have persistent TCC across versions).
+      - name: Import signing certificate
+        id: signing
+        if: steps.ver.outputs.release == 'true'
+        env:
+          CERT_P12_BASE64: ${{ secrets.RELEASE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.RELEASE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CERT_P12_BASE64:-}" ]]; then
+            echo "No RELEASE_CERT_P12_BASE64 secret — release will be ad-hoc signed."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/lizardtype-signing.keychain-db"
+          KP="$(uuidgen)"
+          security create-keychain -p "$KP" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KP" "$KEYCHAIN"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "${CERT_PASSWORD:-lizardtype}" -A -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KP" "$KEYCHAIN" >/dev/null
+          # Put our keychain first so build.sh's `find-identity` sees the cert.
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "Imported signing identity:"
+          security find-identity -p codesigning "$KEYCHAIN"
+
       - name: Build .dmg
         if: steps.ver.outputs.release == 'true'
         run: make dmg

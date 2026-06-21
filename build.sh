@@ -32,6 +32,11 @@ swiftc -O \
 echo "▸ assembling bundle"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
+# Keep-alive / launch-at-login agent (registered at runtime via SMAppService).
+# SMAppService.agent looks for it under Contents/Library/LaunchAgents.
+mkdir -p "$APP/Contents/Library/LaunchAgents"
+cp Resources/com.lizardtype.keepalive.plist "$APP/Contents/Library/LaunchAgents/"
+
 # App icon: generate AppIcon.icns from the 1024² source PNG if it's missing,
 # so fresh clones / CI get an icon without committing the binary .icns.
 ICON_SRC="Resources/AppIcon-source.png"
@@ -50,9 +55,10 @@ fi
 [ -f "$ICON_ICNS" ] && cp "$ICON_ICNS" "$RES_DIR/AppIcon.icns" || true
 
 echo "▸ signing"
-# Prefer the stable self-signed identity (so TCC grants persist across rebuilds);
-# fall back to ad-hoc if it isn't installed.
-IDENTITY="LizardType Self-Signed"
+# Prefer the stable self-signed identity (so TCC grants persist across rebuilds
+# and across releases when CI signs with the same cert); fall back to ad-hoc if
+# it isn't installed. CI overrides the name via SIGN_IDENTITY.
+IDENTITY="${SIGN_IDENTITY:-LizardType Self-Signed}"
 ENT="Resources/LizardType.entitlements"
 SIGNED=""
 # no -v — the cert is self-signed/untrusted, fine for local signing.

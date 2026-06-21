@@ -98,7 +98,9 @@ Releases are built and published automatically by GitHub Actions: push a tag lik
    path (or pre-set it: `defaults write com.lizardtype.app cookiesPath /path/to/cookies.json`).
    Click **Reconnect**; status should read **Ready**.
 2. **Accessibility** — Settings → Permissions → grant Accessibility (needed to
-   capture the global hotkey and to paste). Click **Retry** after granting.
+   capture the global hotkey and to paste). **macOS quits LizardType the moment
+   you flip the switch** — that's normal; it relaunches itself within a couple of
+   seconds (launch-at-login is on by default) and the menu-bar icon comes back.
 3. **Microphone** — granted on your first recording.
 
 ## Use
@@ -116,11 +118,45 @@ Settings → Cleanup — to paste the raw transcript instead (it's on by default
 - **Cleanup fallback**: if the chat endpoint ever rejects the cleanup (OpenAI's
   "sentinel" anti-bot, currently not enforced from the warmed session), the app
   pastes the **raw transcription** instead — you never lose text.
-- **Ad-hoc signing**: each rebuild changes the code signature, so macOS may drop
-  the Accessibility grant after a rebuild — re-add LizardType if the hotkey stops
-  working. (Advanced: sign with a stable self-signed cert to avoid this.)
+- **Code signing**: official release `.dmg`s are signed with a stable self-signed
+  certificate, so your Accessibility grant **persists across updates** — grant
+  once. They're not Apple-notarized, so you still clear the quarantine flag once
+  on first install (see Download). Local `make build` uses your own self-signed
+  cert (`bash setup-cert.sh`) for the same persistence.
 - This automates ChatGPT's consumer endpoints with your own session — intended
   for **personal, single-account** use, not distribution.
+
+## Troubleshooting
+
+- **Menu-bar icon vanished after granting Accessibility / it won't come back:**
+  macOS SIGKILLs the app on a permission change. With launch-at-login on (default)
+  it relaunches within ~2s. If it doesn't, reopen LizardType from Applications, or
+  check **Settings → General → "Launch at login & auto-restart"** is on. You can
+  also hit **Relaunch LizardType** there.
+- **Hotkey stopped working after an update (rare):** if you ever ran an old ad-hoc
+  build, a stale Accessibility entry can shadow the new one. Reset it:
+  ```bash
+  tccutil reset Accessibility com.lizardtype.app
+  ```
+  then reopen LizardType and re-grant. (System Settings → Privacy & Security →
+  Accessibility → select LizardType → "−" also clears it.)
+- **Icon hidden behind the notch:** ⌘-drag menu-bar items to reorder, or use a
+  menu-bar manager (Ice/Bartender) to reveal it.
+
+## Release signing (maintainers)
+
+Official releases are signed with a stable self-signed cert so end users keep
+their Accessibility grant across updates — **free, no Apple Developer account**.
+One-time setup:
+
+```bash
+bash scripts/release-signing-setup.sh   # generates the cert + prints the secrets
+```
+
+Add the two printed secrets to the repo (Settings → Secrets and variables →
+Actions): `RELEASE_CERT_P12_BASE64` and `RELEASE_CERT_PASSWORD`. The release
+workflow imports them and signs every build with that identity. Without the
+secrets, releases fall back to ad-hoc signing (forks still build fine).
 
 ## Layout
 
@@ -134,6 +170,7 @@ Sources/
   Input/HotkeyManager.swift  CGEventTap push-to-talk
   Input/TextInserter.swift   NSPasteboard + synthesized ⌘V
   Input/PermissionsManager.swift  mic + accessibility
+  Lifecycle/LaunchManager.swift   launchd keep-alive + launch-at-login (SMAppService)
   UI/RecordingOverlay.swift  floating waveform panel
   UI/SettingsView.swift      settings window
   Model/Settings.swift       UserDefaults-backed (AppSettings)

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lizardtype.keepalive</string>
+
+    <!-- Path is resolved relative to the .app bundle, so moving the app is fine.
+         This is the same menu-bar binary; launchd just owns its lifecycle. -->
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/LizardType</string>
+
+    <!-- Start at login… -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- …and bring it straight back if it dies *uncleanly*. macOS sends SIGKILL
+         (an unsuccessful exit) when the user toggles Accessibility, so this is
+         what makes the menu-bar icon reappear on its own. A normal "Quit"
+         (exit 0) is a successful exit, so launchd leaves it quit. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Don't tight-loop if it ever crashes on launch. -->
+    <key>ThrottleInterval</key>
+    <integer>2</integer>
+
+    <!-- GUI session only, so the status item can draw. -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

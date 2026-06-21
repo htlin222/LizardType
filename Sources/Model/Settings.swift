@@ -56,6 +56,8 @@ final class AppSettings: ObservableObject {
     @Published var cleanupPrompt: String { didSet { d.set(cleanupPrompt, forKey: "cleanupPrompt") } }
     @Published var playSounds: Bool { didSet { d.set(playSounds, forKey: "playSounds") } }
     @Published var maxRecordingSeconds: Int { didSet { d.set(maxRecordingSeconds, forKey: "maxRecordingSeconds") } }
+    // Keep the menu-bar icon alive across the Accessibility-grant SIGKILL + at login.
+    @Published var launchAtLogin: Bool { didSet { d.set(launchAtLogin, forKey: "launchAtLogin") } }
 
     var shortcutDisplay: String {
         useCustomShortcut ? KeyFormatter.string(keyCode: shortcutKeyCode, modifiers: shortcutModifiers)
@@ -79,5 +81,6 @@ final class AppSettings: ObservableObject {
         cleanupPrompt = d.string(forKey: "cleanupPrompt") ?? Prompts.defaultCleanup
         playSounds = d.object(forKey: "playSounds") as? Bool ?? true
         maxRecordingSeconds = d.object(forKey: "maxRecordingSeconds") as? Int ?? 60
+        launchAtLogin = d.object(forKey: "launchAtLogin") as? Bool ?? true
     }
 }
