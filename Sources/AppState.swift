@@ -156,10 +156,11 @@ final class AppState: ObservableObject {
             }
         }
 
-        // Reclaim the WebView's WebContent memory when idle (ChatGPT provider only).
-        // Cheap to call every tick; it self-gates on idle time and never fires mid-use.
+        // Reclaim the WebView's WebContent process to bound memory (ChatGPT provider
+        // only). Cheap to call every tick; it self-gates on idle/usage and never fires
+        // mid-use (we additionally require !busy && !recording here).
         if settings.provider == .chatgpt, !busy, !recorder.isRecording {
-            bridge.recycleIfIdle()
+            bridge.maybeRecycle()
         }
     }
 

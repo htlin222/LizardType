@@ -25,7 +25,9 @@ final class ChatGPTBridge: NSObject, WKNavigationDelegate {
         }
     }
 
-    let webView: WKWebView
+    /// The off-screen WebView is replaced wholesale on recycle (see `maybeRecycle`),
+    /// so it is a `var`. It is never added to a view hierarchy — purely a JS context.
+    private(set) var webView: WKWebView
     private(set) var isReady = false
     private var readyWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -33,23 +35,33 @@ final class ChatGPTBridge: NSObject, WKNavigationDelegate {
     private var tokenFetchedAt: Date = .distantPast
     private let tokenTTL: TimeInterval = 240
 
-    /// Last time the bridge did real work, and last time we recycled the page.
-    /// Used to reclaim WebContent memory when the app has been idle (see `recycleIfIdle`).
+    /// Last time the bridge did real work, and last time we recycled the WebView.
+    /// Used to reclaim the WebContent process — both on idle and during heavy use
+    /// (see `maybeRecycle`). `cookiesPath` is remembered so a recycle can re-warm itself.
     private var lastActivity = Date()
     private var lastReload = Date()
+    private var dictationsSinceReload = 0
+    private var cookiesPath: String?
 
     override init() {
-        let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = .default()
-        webView = WKWebView(frame: .init(x: 0, y: 0, width: 1024, height: 768), configuration: cfg)
+        webView = Self.makeWebView()
         super.init()
         webView.navigationDelegate = self
+    }
+
+    /// Build a fresh, off-screen WKWebView backed by the shared (persistent) data
+    /// store so cookies survive across rebuilds.
+    private static func makeWebView() -> WKWebView {
+        let cfg = WKWebViewConfiguration()
+        cfg.websiteDataStore = .default()
+        return WKWebView(frame: .init(x: 0, y: 0, width: 1024, height: 768), configuration: cfg)
     }
 
     // MARK: - Lifecycle
 
     /// Inject cookies and load chatgpt.com. Safe to call again to re-warm.
     func start(cookiesPath: String) async throws {
+        self.cookiesPath = cookiesPath
         isReady = false
         let cookies = try CookieLoader.load(from: cookiesPath)
         let store = webView.configuration.websiteDataStore.httpCookieStore
@@ -88,20 +100,58 @@ final class ChatGPTBridge: NSObject, WKNavigationDelegate {
         for w in waiters { w.resume() }
     }
 
-    /// Reclaim WebContent-process memory by reloading the warmed page after a long
-    /// idle stretch. ChatGPT's SPA never frees what it accumulates across dictations,
-    /// so a fresh load bounds the growth. No-op while busy / recently used so it never
-    /// interrupts an in-flight request. Cookies persist in the data store, so the
-    /// reloaded page stays logged in.
-    func recycleIfIdle(idleThreshold: TimeInterval = 600) {
-        guard isReady else { return }   // mid-load: leave it alone
+    /// Reclaim the WebContent process to bound memory growth. ChatGPT's SPA never
+    /// frees what it accumulates across dictations, and a plain `reload()` reuses the
+    /// same WebContent process (its resident memory rarely returns to the OS), so we
+    /// tear the whole WebView down and rebuild it — that terminates the child process
+    /// and gives the JS heap a clean slate. Cookies persist in the shared data store,
+    /// so the rebuilt page stays logged in.
+    ///
+    /// Fires when EITHER:
+    ///   • the app has been idle for `idleThreshold` (overnight / between sessions), OR
+    ///   • `maxDictations` dictations have run and a `briefGap` pause has opened up —
+    ///     so memory is reclaimed *during* heavy use, not only when fully idle.
+    ///
+    /// Self-gates on `isReady` so it never interrupts an in-flight load or another
+    /// rebuild; callers additionally gate on `!busy && !recording`.
+    func maybeRecycle(idleThreshold: TimeInterval = 600,
+                      maxDictations: Int = 6,
+                      briefGap: TimeInterval = 8) {
+        guard isReady else { return }          // mid-load / mid-rebuild: leave it alone
+        guard cookiesPath != nil else { return }
         let now = Date()
-        guard now.timeIntervalSince(lastActivity) > idleThreshold,
-              now.timeIntervalSince(lastReload) > idleThreshold else { return }
+        let idle = now.timeIntervalSince(lastActivity)
+        let idleDue  = idle > idleThreshold && now.timeIntervalSince(lastReload) > idleThreshold
+        let usageDue = dictationsSinceReload >= maxDictations && idle > briefGap
+        guard idleDue || usageDue else { return }
+
         lastReload = now
-        isReady = false
+        dictationsSinceReload = 0
         cachedToken = nil
-        webView.reload()
+        isReady = false                        // blocks re-entry on the next poll tick
+        NSLog("[LizardType] recycling WebView (%@) — reclaiming WebContent process",
+              usageDue ? "after \(maxDictations) dictations" : "idle \(Int(idleThreshold))s")
+        Task { await rebuild() }
+    }
+
+    /// Drop the current WebView (terminating its WebContent process) and warm a fresh
+    /// one. The old instance has no other strong references, so ARC frees it here.
+    private func rebuild() async {
+        let old = webView
+        old.navigationDelegate = nil
+        old.stopLoading()
+        let fresh = Self.makeWebView()
+        webView = fresh                        // old WebView (and its process) released
+        fresh.navigationDelegate = self
+        guard let path = cookiesPath else { return }
+        do {
+            try await start(cookiesPath: path)
+        } catch {
+            // Re-warm failed: leave `isReady` false. waitUntilReady() callers are
+            // resumed by the navigation-failure delegates, and the user can Reconnect.
+            NSLog("[LizardType] bridge rebuild re-warm failed: %@", error.localizedDescription)
+            resumeWaiters()
+        }
     }
 
     // MARK: - Auth
@@ -135,6 +185,7 @@ final class ChatGPTBridge: NSObject, WKNavigationDelegate {
     func transcribe(audioURL: URL, language: String) async throws -> String {
         guard isReady else { throw BridgeError.notReady }
         lastActivity = Date()
+        dictationsSinceReload += 1
         let data = try Data(contentsOf: audioURL)
         let b64 = data.base64EncodedString()
         let name = audioURL.lastPathComponent
